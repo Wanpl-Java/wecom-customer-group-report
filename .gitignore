@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+data/archive.db
+output/
+keys/private.pem
+keys/*.pem
+lib/*.so
+lib/*.h
+config.yaml
+!.gitkeep

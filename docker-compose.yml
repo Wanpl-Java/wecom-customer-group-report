@@ -1,0 +1,15 @@
+services:
+  wecom-report:
+    build: .
+    container_name: wecom-customer-group-report
+    ports:
+      - "8088:8088"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./keys:/app/keys:ro
+      - ./lib:/app/lib:ro
+      - ./data:/app/data
+      - ./output:/app/output
+    environment:
+      WECOM_REPORT_CONFIG: /app/config.yaml
+    restart: unless-stopped

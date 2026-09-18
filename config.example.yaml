@@ -1,0 +1,44 @@
+mode: demo  # demo | sdk | json
+
+server:
+  host: "0.0.0.0"
+  port: 8088
+
+paths:
+  data_dir: "./data"
+  output_dir: "./output"
+  db_path: "./data/archive.db"
+
+wecom:
+  corp_id: "wwxxxxxxxx"
+  # 会话内容存档 Secret（管理后台 → 管理工具 → 会话内容存档）
+  archive_secret: "replace-me"
+  # 可选：客户联系 Secret，用于拉取外部客户群名称
+  contact_secret: ""
+  private_key_path: "./keys/private.pem"
+  # 仅同步这些 roomid；空=全部有 roomid 的群消息，再按外部群规则过滤
+  room_allowlist: []
+  # msgid 含 _external 或能查到客户群详情的视为外部客户群
+  external_only: true
+
+sdk:
+  library_path: "./lib/libWeWorkFinanceSdk_C.so"
+  batch_size: 200
+  timeout_seconds: 10
+  proxy: ""
+  proxy_password: ""
+
+sync:
+  # 启动 Web 时是否自动同步一次
+  run_on_startup: false
+  # 定时同步间隔分钟；0=关闭
+  interval_minutes: 0
+
+analyze:
+  # 员工 userid 前缀/列表：用于区分客户提问 vs 员工回复（可空）
+  staff_userids: []
+  default_product: "JS"
+  sla_hours: 48
+
+report:
+  default_period: "month"

@@ -38,9 +38,10 @@ ISSUE_HINTS = (
     "bug",
 )
 
-DONE_HINTS = ("已解决", "已完结", "搞定", "处理好了", "关闭问题", "#done")
+DONE_HINTS = ("已解决", "已完结", "搞定", "处理好了", "关闭问题", "#done", "感谢", "谢谢", "可以了", "没问题", "解决了", "辛苦了", "麻烦了", "好嘞", "收到谢谢", "好的谢谢")
 DOING_HINTS = ("处理中", "跟进中", "排查中", "看一下", "#doing")
 OPEN_HINTS = ("遗留", "未解决", "待确认", "#open")
+CLOSING_ACK = {"谢谢", "感谢", "可以了", "没问题", "解决了", "辛苦了", "好嘞", "麻烦你了"}
 
 
 def infer_module(text: str) -> str:
@@ -110,18 +111,29 @@ def messages_to_tickets(messages: list[ChatMessage], cfg: AnalyzeConfig) -> list
         group_name = next((m.group_name for m in msgs if m.group_name), "")
         customer = next((m.customer for m in msgs if m.customer), "")
         open_ticket: Ticket | None = None
+        has_staff_reply = False
 
         for m in msgs:
             text = m.content.strip()
             staff = _is_staff(m.sender, cfg.staff_userids)
             st = _status(text)
             sat = _sat(text)
+            ack = any(a in text for a in CLOSING_ACK)
 
-            if not staff and _looks_like_issue(text):
+            # 员工已回复后客户发收尾致谢 -> 关闭当前 open 单（显式闭环）
+            if open_ticket and not staff and has_staff_reply and ack:
+                open_ticket.last_msg_ms = m.msgtime
+                open_ticket.status = "done"
+                open_ticket.closed_at = m.sent_at().strftime("%Y-%m-%d %H:%M")
+                od = open_ticket.opened_dt()
+                if od:
+                    open_ticket.resolve_hours = round((m.sent_at() - od).total_seconds() / 3600, 1)
+                open_ticket = None
+                has_staff_reply = False
+                continue
+
+            if not staff and _looks_like_issue(text) and not ack:
                 # 新问题
-                if open_ticket and open_ticket.is_open():
-                    # 上一个未闭环，保持；本条也记一条
-                    pass
                 product = infer_product(text, cfg.default_product)
                 summary = re.sub(r"(?:满意度|sat)\s*[=:：]?\s*[1-5]", "", text, flags=re.I)
                 summary = re.sub(r"(已解决|已完结|处理中|跟进中|遗留|#\w+)", "", summary).strip()
@@ -139,6 +151,7 @@ def messages_to_tickets(messages: list[ChatMessage], cfg: AnalyzeConfig) -> list
                     sat_score=sat,
                     sla_hours=cfg.sla_hours,
                     source_msgid=m.msgid,
+                    last_msg_ms=m.msgtime,
                 )
                 if open_ticket.status == "done":
                     open_ticket.closed_at = open_ticket.opened_at
@@ -146,6 +159,8 @@ def messages_to_tickets(messages: list[ChatMessage], cfg: AnalyzeConfig) -> list
                 continue
 
             if open_ticket and staff:
+                open_ticket.last_msg_ms = m.msgtime
+                has_staff_reply = True
                 if not open_ticket.owner:
                     open_ticket.owner = m.sender
                 if st:
@@ -156,17 +171,16 @@ def messages_to_tickets(messages: list[ChatMessage], cfg: AnalyzeConfig) -> list
                     open_ticket.closed_at = m.sent_at().strftime("%Y-%m-%d %H:%M")
                     od = open_ticket.opened_dt()
                     if od:
-                        open_ticket.resolve_hours = round(
-                            (m.sent_at() - od).total_seconds() / 3600, 1
-                        )
+                        open_ticket.resolve_hours = round((m.sent_at() - od).total_seconds() / 3600, 1)
                     open_ticket = None
+                    has_staff_reply = False
                 elif sat is not None and "满意" in text:
                     # 闭环满意度短句
                     open_ticket.status = "done"
                     open_ticket.closed_at = m.sent_at().strftime("%Y-%m-%d %H:%M")
                     open_ticket = None
+                    has_staff_reply = False
 
-            # 员工单独报满意度/完结且无 open_ticket：忽略或作独立闭环记录
             elif staff and (st == "done" or sat is not None) and _looks_like_issue(text):
                 product = infer_product(text, cfg.default_product)
                 tickets.append(
@@ -184,6 +198,7 @@ def messages_to_tickets(messages: list[ChatMessage], cfg: AnalyzeConfig) -> list
                         sat_score=sat,
                         sla_hours=cfg.sla_hours,
                         source_msgid=m.msgid,
+                        last_msg_ms=m.msgtime,
                     )
                 )
 

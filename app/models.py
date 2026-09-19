@@ -44,6 +44,7 @@ class Ticket:
     sat_score: int | None = None
     sla_hours: float = 48.0
     source_msgid: str = ""
+    last_msg_ms: int = 0
 
     def opened_dt(self) -> datetime | None:
         return _parse_dt(self.opened_at)

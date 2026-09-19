@@ -69,7 +69,15 @@ def _sat_bucket(scores: list[int]) -> dict[str, int]:
     return dist
 
 
-def stats_for(items: list[Ticket], start: datetime, end: datetime) -> dict:
+DEFAULT_RESOLVE_IDLE_DAYS = 3
+
+
+def _resolve_idle_days(cfg_idle: int | None = None) -> int:
+    # 优先使用调用方传入（可后续接 config.report.resolve_idle_days），否则默认 3 天
+    return int(cfg_idle) if cfg_idle else DEFAULT_RESOLVE_IDLE_DAYS
+
+
+def stats_for(items: list[Ticket], start: datetime, end: datetime, end_ms: int, idle_ms: int) -> dict:
     new_cnt = done_cnt = open_end = sla_breach = 0
     sats: list[int] = []
     modules: Counter[str] = Counter()
@@ -80,11 +88,14 @@ def stats_for(items: list[Ticket], start: datetime, end: datetime) -> dict:
         od = t.opened_dt()
         if od and _in_window(od, start, end):
             new_cnt += 1
-        if t.is_done():
-            cd = t.closed_dt()
-            if cd is None or _in_window(cd, start, end):
-                done_cnt += 1
-        if t.is_open():
+        lmm = t.last_msg_ms or 0
+        if lmm <= 0 and od is not None:
+            lmm = int(od.timestamp() * 1000)
+        stale = (end_ms - lmm) >= idle_ms
+        active_open = t.is_open() and not stale
+        if t.is_done() or (t.is_open() and stale):
+            done_cnt += 1
+        if active_open:
             open_end += 1
             age_h = (end - od).total_seconds() / 3600 if od else None
             breach = bool(age_h is not None and age_h > t.sla_hours)
@@ -140,11 +151,21 @@ def aggregate_by_groups(
     year: int | None = None,
     month: int | None = None,
     quarter: int | None = None,
+    resolve_idle_days: int | None = None,
 ) -> dict:
     start, end, label = resolve_period(
         period_type, days=days, year=year, month=month, quarter=quarter
     )
     in_period = filter_tickets(tickets, start, end)
+    idle_ms = _resolve_idle_days(resolve_idle_days) * 86400 * 1000
+
+    last_ms_list = [t.last_msg_ms for t in in_period if t.last_msg_ms and t.last_msg_ms > 0]
+    if last_ms_list:
+        end_ms = max(last_ms_list)
+    else:
+        open_ts = [int(t.opened_dt().timestamp() * 1000) for t in in_period if t.opened_dt() is not None]
+        end_ms = max(open_ts) if open_ts else int(end.timestamp() * 1000)
+
     grouped: dict[str, list[Ticket]] = defaultdict(list)
     for t in in_period:
         grouped[t.group_key()].append(t)
@@ -153,7 +174,7 @@ def aggregate_by_groups(
     for gname, items in grouped.items():
         customers = sorted({t.customer for t in items if t.customer})
         products = sorted({t.product for t in items if t.product})
-        st = stats_for(items, start, end)
+        st = stats_for(items, start, end, end_ms, idle_ms)
         groups.append(
             {
                 "group_name": gname,

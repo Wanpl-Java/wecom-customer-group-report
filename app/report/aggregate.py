@@ -69,7 +69,7 @@ def _sat_bucket(scores: list[int]) -> dict[str, int]:
     return dist
 
 
-DEFAULT_RESOLVE_IDLE_DAYS = 3
+DEFAULT_RESOLVE_IDLE_DAYS = 2
 
 
 def _resolve_idle_days(cfg_idle: int | None = None) -> int:
@@ -78,6 +78,8 @@ def _resolve_idle_days(cfg_idle: int | None = None) -> int:
 
 
 def stats_for(items: list[Ticket], start: datetime, end: datetime, end_ms: int, idle_ms: int) -> dict:
+    now_ms = int(datetime.now().timestamp() * 1000)
+    effective_end_ms = max(end_ms, now_ms)
     new_cnt = done_cnt = open_end = sla_breach = 0
     sats: list[int] = []
     modules: Counter[str] = Counter()
@@ -91,25 +93,28 @@ def stats_for(items: list[Ticket], start: datetime, end: datetime, end_ms: int, 
         lmm = t.last_msg_ms or 0
         if lmm <= 0 and od is not None:
             lmm = int(od.timestamp() * 1000)
-        stale = (end_ms - lmm) >= idle_ms
-        active_open = t.is_open() and not stale
-        if t.is_done() or (t.is_open() and stale):
+        stale = (effective_end_ms - lmm) >= idle_ms
+        last_role = getattr(t, 'last_msg_role', '') or (t.context[-1].get('role', '') if t.context else '')
+        staff_resolved = t.is_open() and stale and last_role == 'staff'
+        if t.is_done() or staff_resolved or (t.is_open() and stale):
             done_cnt += 1
-        if active_open:
-            open_end += 1
-            age_h = (end - od).total_seconds() / 3600 if od else None
-            breach = bool(age_h is not None and age_h > t.sla_hours)
-            if breach:
-                sla_breach += 1
-            leftovers.append(
-                {
-                    "module": t.module or infer_module(t.summary),
-                    "summary": t.summary,
-                    "owner": t.owner or "-",
-                    "age_days": round(age_h / 24, 1) if age_h is not None else "-",
-                    "sla_breach": breach,
-                }
-            )
+        else:
+            active_open = t.is_open() and not stale
+            if active_open:
+                open_end += 1
+                age_h = (effective_end_ms - lmm) / 3600000 if lmm else None
+                breach = bool(age_h is not None and age_h > t.sla_hours)
+                if breach:
+                    sla_breach += 1
+                leftovers.append(
+                    {
+                        "module": t.module or infer_module(t.summary),
+                        "summary": t.summary,
+                        "owner": t.owner or "-",
+                        "age_days": round(age_h / 24, 1) if age_h is not None else "-",
+                        "sla_breach": breach,
+                    }
+                )
         if t.sat_score is not None:
             sats.append(t.sat_score)
         mod = t.module or infer_module(t.summary)
@@ -123,6 +128,7 @@ def stats_for(items: list[Ticket], start: datetime, end: datetime, end_ms: int, 
                 "owner": t.owner or "-",
                 "opened_at": t.opened_at,
                 "sat_score": t.sat_score,
+                "context": t.context,
             }
         )
 
@@ -141,7 +147,6 @@ def stats_for(items: list[Ticket], start: datetime, end: datetime, end_ms: int, 
         "leftovers": leftovers[:50],
         "details": details,
     }
-
 
 def aggregate_by_groups(
     tickets: list[Ticket],

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterator
@@ -45,6 +45,8 @@ class Ticket:
     sla_hours: float = 48.0
     source_msgid: str = ""
     last_msg_ms: int = 0
+    last_msg_role: str = ""
+    context: list = field(default_factory=list)
 
     def opened_dt(self) -> datetime | None:
         return _parse_dt(self.opened_at)

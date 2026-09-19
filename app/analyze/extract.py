@@ -41,7 +41,7 @@ ISSUE_HINTS = (
 DONE_HINTS = ("已解决", "已完结", "搞定", "处理好了", "关闭问题", "#done", "感谢", "谢谢", "可以了", "没问题", "解决了", "辛苦了", "麻烦了", "好嘞", "收到谢谢", "好的谢谢")
 DOING_HINTS = ("处理中", "跟进中", "排查中", "看一下", "#doing")
 OPEN_HINTS = ("遗留", "未解决", "待确认", "#open")
-CLOSING_ACK = {"谢谢", "感谢", "可以了", "没问题", "解决了", "辛苦了", "好嘞", "麻烦你了"}
+CLOSING_ACK = {"谢谢", "感谢", "可以了", "没问题", "解决了", "辛苦了", "好嘞", "麻烦你了", "已正常", "正常了", "好了", "已恢复", "恢复正常", "好的谢谢", "好的 谢谢", "好的，谢谢", "我这边正常了", "好的谢谢了", "行谢谢"}
 
 
 def infer_module(text: str) -> str:
@@ -123,6 +123,9 @@ def messages_to_tickets(messages: list[ChatMessage], cfg: AnalyzeConfig) -> list
             # 员工已回复后客户发收尾致谢 -> 关闭当前 open 单（显式闭环）
             if open_ticket and not staff and has_staff_reply and ack:
                 open_ticket.last_msg_ms = m.msgtime
+                open_ticket.context.append(
+                    {"sender": m.sender, "role": "customer", "text": text[:500], "time": m.sent_at().strftime("%Y-%m-%d %H:%M")}
+                )
                 open_ticket.status = "done"
                 open_ticket.closed_at = m.sent_at().strftime("%Y-%m-%d %H:%M")
                 od = open_ticket.opened_dt()
@@ -131,8 +134,24 @@ def messages_to_tickets(messages: list[ChatMessage], cfg: AnalyzeConfig) -> list
                 open_ticket = None
                 has_staff_reply = False
                 continue
+            if open_ticket and not staff and not _looks_like_issue(text) and not ack:
+                open_ticket.last_msg_ms = m.msgtime
+                open_ticket.last_msg_role = "customer"
+                open_ticket.context.append(
+                    {"sender": m.sender, "role": "customer", "text": text[:500], "time": m.sent_at().strftime("%Y-%m-%d %H:%M")}
+                )
+                continue
+
 
             if not staff and _looks_like_issue(text) and not ack:
+                # 员工未回复时，客户追问合并为同一工单
+                if open_ticket and not has_staff_reply:
+                    open_ticket.last_msg_ms = m.msgtime
+                    open_ticket.last_msg_role = "customer"
+                    open_ticket.context.append(
+                        {"sender": m.sender, "role": "customer", "text": text[:500], "time": m.sent_at().strftime("%Y-%m-%d %H:%M")}
+                    )
+                    continue
                 # 新问题
                 product = infer_product(text, cfg.default_product)
                 summary = re.sub(r"(?:满意度|sat)\s*[=:：]?\s*[1-5]", "", text, flags=re.I)
@@ -152,14 +171,22 @@ def messages_to_tickets(messages: list[ChatMessage], cfg: AnalyzeConfig) -> list
                     sla_hours=cfg.sla_hours,
                     source_msgid=m.msgid,
                     last_msg_ms=m.msgtime,
+                    last_msg_role="customer",
                 )
                 if open_ticket.status == "done":
                     open_ticket.closed_at = open_ticket.opened_at
+                open_ticket.context = [
+                    {"sender": m.sender, "role": "customer", "text": text[:500], "time": m.sent_at().strftime("%Y-%m-%d %H:%M")}
+                ]
                 tickets.append(open_ticket)
                 continue
 
             if open_ticket and staff:
                 open_ticket.last_msg_ms = m.msgtime
+                open_ticket.last_msg_role = "staff"
+                open_ticket.context.append(
+                    {"sender": m.sender, "role": "staff", "text": text[:500], "time": m.sent_at().strftime("%Y-%m-%d %H:%M")}
+                )
                 has_staff_reply = True
                 if not open_ticket.owner:
                     open_ticket.owner = m.sender
@@ -199,6 +226,7 @@ def messages_to_tickets(messages: list[ChatMessage], cfg: AnalyzeConfig) -> list
                         sla_hours=cfg.sla_hours,
                         source_msgid=m.msgid,
                         last_msg_ms=m.msgtime,
+                        last_msg_role="staff",
                     )
                 )
 

@@ -96,6 +96,11 @@ def _css() -> str:
     .rank .n{width:22px;height:22px;border-radius:50%;background:#f2f4f7;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700}
     footer{margin-top:20px;color:var(--muted);font-size:12px}
     .ops{color:var(--muted);font-size:12px}
+    details{font-size:12px}details summary{cursor:pointer;color:var(--js)}
+    .msg{margin:4px 0;padding:4px 8px;background:#f8f9fa;border-radius:4px;font-size:12px}
+    .msg-role{font-weight:600;margin-right:4px}.msg-role.staff{color:var(--js)}.msg-role.cust{color:var(--ok)}
+    .msg-time{color:var(--muted);font-size:11px}.msg-text{word-break:break-all}
+    .ctx{max-height:300px;overflow-y:auto}
     """
 
 
@@ -130,15 +135,24 @@ def render_group_html(group: dict, meta: dict) -> str:
     detail_rows = []
     for d in group.get("details") or []:
         sat_c = str(d["sat_score"]) if d.get("sat_score") is not None else "-"
+        ctx = d.get("context") or []
+        if ctx:
+            msgs_html = ''.join(
+                f'<div class="msg"><span class="msg-role {"staff" if msg["role"]=="staff" else "cust"}">{"[支持]" if msg["role"]=="staff" else "[客户]"}</span><span class="msg-time">{escape(str(msg.get("time","")))}</span><br><span class="msg-text">{escape(str(msg.get("text","")))}</span></div>'
+                for msg in ctx
+            )
+            context_col = f'<td><details><summary>{len(ctx)}条</summary><div class="ctx">{msgs_html}</div></details></td>'
+        else:
+            context_col = '<td>-</td>'
         detail_rows.append(
             "<tr>"
             f"<td>{escape(d['product'])}</td><td>{escape(d['module'])}</td>"
             f"<td>{escape(d['summary'])}</td><td>{escape(d['status'])}</td>"
             f"<td>{escape(str(d['owner']))}</td><td>{escape(str(d['opened_at']))}</td>"
-            f"<td>{escape(sat_c)}</td></tr>"
+            f"<td>{escape(sat_c)}</td>{context_col}</tr>"
         )
     if not detail_rows:
-        detail_rows.append('<tr><td colspan="7">本期无明细</td></tr>')
+        detail_rows.append('<tr><td colspan="8">本期无明细</td></tr>')
 
     leftover_rows = []
     for item in group.get("leftovers") or []:
@@ -185,7 +199,7 @@ def render_group_html(group: dict, meta: dict) -> str:
 <table><thead><tr><th>模块</th><th>摘要</th><th>负责人</th><th>打开天数</th><th>标记</th></tr></thead>
 <tbody>{''.join(leftover_rows)}</tbody></table></div>
 <div class="panel"><h3>本期明细</h3>
-<table><thead><tr><th>产品</th><th>模块</th><th>摘要</th><th>状态</th><th>负责人</th><th>开单</th><th>满意度</th></tr></thead>
+<table><thead><tr><th>产品</th><th>模块</th><th>摘要</th><th>状态</th><th>负责人</th><th>开单</th><th>满意度</th><th>对话</th></tr></thead>
 <tbody>{''.join(detail_rows)}</tbody></table></div>
 <footer>数据来源：企业微信会话内容存档。</footer>
 </div></body></html>"""
